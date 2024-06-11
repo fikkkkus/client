@@ -10,6 +10,8 @@ import android.graphics.Path
 import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 // Определение уникального действия для вашего события
 const val CUSTOM_EVENT_ACTION = "com.bignerdranch.android.client.CUSTOM_EVENT"
@@ -24,8 +26,10 @@ class CustomAccessibilityService(
         customEventReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == CUSTOM_EVENT_ACTION) {
-                    val message = intent.getStringExtra("message")
-                    handleCustomEvent(message)
+                    Log.e("Gesture", "fuck")
+                    val gestureParamsJson = intent.getStringExtra("gestureParams")
+                    val gestureParams = Json.decodeFromString<MainActivity.GestureParams>(gestureParamsJson!!)
+                    handleCustomEvent(gestureParams)
                 }
             }
         }
@@ -33,28 +37,31 @@ class CustomAccessibilityService(
         registerReceiver(customEventReceiver, filter)
     }
 
-    private fun handleCustomEvent(message: String?) {
+    private fun handleCustomEvent(gestureParams: MainActivity.GestureParams) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             val displayMetrics = applicationContext.resources.displayMetrics
             val middleXValue = displayMetrics.widthPixels / 2
-            val topOfScreen = displayMetrics.heightPixels / 4
-            val bottomOfScreen = topOfScreen * 3
+            val middleYValue = displayMetrics.heightPixels / 2
             val gestureBuilder = GestureDescription.Builder()
             val path = Path()
-            if (message != null && message.toString().contains("0")) {
+
+            val startY: Float
+            val endY: Float
+
+            if (gestureParams.direction == 0) {
                 // Swipe up
-                path.moveTo(middleXValue.toFloat(), bottomOfScreen.toFloat())
-                path.lineTo(middleXValue.toFloat(), topOfScreen.toFloat())
-                Log.e("onAccessibilityEvent", "onAccessibilityEvent3")
+                startY = (middleYValue + (gestureParams.distance / 2)).toFloat()
+                endY = (middleYValue - (gestureParams.distance / 2)).toFloat()
             } else {
-                Log.e("onAccessibilityEvent", "onAccessibilityEvent3")
                 // Swipe down
-                path.moveTo(middleXValue.toFloat(), topOfScreen.toFloat())
-                path.lineTo(middleXValue.toFloat(), bottomOfScreen.toFloat())
+                startY = (middleYValue - (gestureParams.distance / 2)).toFloat()
+                endY = (middleYValue + (gestureParams.distance / 2)).toFloat()
             }
-            Log.e("onAccessibilityEvente", "onAccessibilityEvent4")
-            gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 100, 50))
-            //val accessibilityService = context.getSystemService(AccessibilityService::class.java)
+
+            path.moveTo(middleXValue.toFloat(), startY)
+            path.lineTo(middleXValue.toFloat(), endY)
+
+            gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, 50))
             dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription) {
                     Log.e("Gesture", "onCompleted")
@@ -68,11 +75,12 @@ class CustomAccessibilityService(
             }, null)
         }
     }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         ;
     }
 
     override fun onInterrupt() {
-
+        ;
     }
 }

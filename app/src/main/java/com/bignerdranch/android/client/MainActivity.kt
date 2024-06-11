@@ -1,15 +1,17 @@
 package com.bignerdranch.android.client
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ActivityNotFoundException
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.provider.Settings
+import android.text.TextUtils
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -36,8 +38,9 @@ import io.ktor.websocket.readText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
-
-
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 class MainActivity : ComponentActivity() {
 
@@ -47,9 +50,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        CAS = CustomAccessibilityService()
+
         setContent {
             ClientTheme {
-                // A surface container using the 'background' color from the theme
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -66,9 +70,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun isAccessibilityServiceEnabled(context: Context, service: Class<out AccessibilityService>): Boolean {
+        val enabledServicesSetting = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
+        val colonSplitter = TextUtils.SimpleStringSplitter(':')
+        colonSplitter.setString(enabledServicesSetting)
+        val serviceComponentName = "${context.packageName}/${service.name}"
+        while (colonSplitter.hasNext()) {
+            val componentName = colonSplitter.next()
+            if (componentName.equals(serviceComponentName, ignoreCase = true)) {
+                return true
+            }
+        }
+        return false
+    }
+
+
     override fun onResume() {
         super.onResume()
     }
+
+    @Serializable
+    data class GestureParams(val direction: Int, val distance: Int)
 
     private fun connectToWebSocket() {
         GlobalScope.launch(Dispatchers.IO) {
@@ -77,59 +99,51 @@ class MainActivity : ComponentActivity() {
             }
 
             client.ws(host = "192.168.0.102", port = 8080, path = "/ws") {
-                val responseText = "OOOOOOOOOOOOOOOO"
+                val responseText = "Google Chrome is running"
                 send(Frame.Text(responseText))
                 for (frame in incoming) {
                     frame as? Frame.Text ?: continue
-                    val receivedText = frame.readText()
-                    Log.e("Received", receivedText)
+                    val gestureParams = frame.readText()
+                    Log.e("Received", gestureParams)
 
-                    val params = receivedText.split(".")
-                    val param1 = params[0].toIntOrNull() ?: 0
-                    val param2 = params.getOrElse(1) { "0" }.toIntOrNull() ?: 0
-
-                    val event = AccessibilityEvent.obtain()
-                    event.eventType = AccessibilityEvent.TYPE_ANNOUNCEMENT
-                    event.text.add(param1.toString() + "." + param2.toString())
-
-                CAS.onAccessibilityEvent(event)
+                    sendCustomEvent(applicationContext, gestureParams)
+                    // Отправить сообщение об успешном выполнении жеста обратно на сервер
+                    val report = "Gesture executed successfully with parameters: $gestureParams"
+                    send(Frame.Text(report))
                 }
-
-
             }
         }
     }
 
-    fun sendCustomEvent(context: Context, message: String) {
+    fun sendCustomEvent(context: Context, gestureParams: String) {
         val intent = Intent(CUSTOM_EVENT_ACTION)
-        intent.putExtra("message", message)
+        intent.putExtra("gestureParams", gestureParams)
         context.sendBroadcast(intent)
     }
-
 
     @Composable
     fun StartButton(activity: ComponentActivity) {
         Button(
             onClick = {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://www.google.com"))
-                activity.startActivity(intent)
-                CAS = CustomAccessibilityService()
-                // Запуск функции для подключения к веб-сокету
+                if (!isAccessibilityServiceEnabled(activity, CustomAccessibilityService::class.java)) {
+                    Toast.makeText(activity, "Please enable accessibility service", Toast.LENGTH_LONG).show()
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    activity.startActivity(intent)
+                } else {
 
-                val handler = Handler(Looper.getMainLooper())
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("http://www.google.com"))
+                    intent.setPackage("com.android.chrome")
 
-                val event = AccessibilityEvent.obtain()
-                event.eventType = AccessibilityEvent.TYPE_ANNOUNCEMENT
-                event.text.add(1.toString() + "." + 20.toString())
-                var runnable = object : Runnable {
-                    override fun run() {
-                        sendCustomEvent(applicationContext, "0.20")
-
-                        // Запланировать выполнение через 10 секунд
-                        handler.postDelayed(this, 1000)
+                    try {
+                        activity.startActivity(intent)
+                        Log.d("MyApp", "Chrome was successfully started")
+                        connectToWebSocket()
+                    } catch (e: ActivityNotFoundException) {
+                        Log.e("MyApp", "Chrome is not installed", e)
+                    } catch (e: Exception) {
+                        Log.e("MyApp", "Unexpected error occurred while starting Chrome", e)
                     }
                 }
-                runnable.run()
             },
             modifier = Modifier.padding(16.dp)
         ) {
@@ -137,9 +151,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-
-
 
 @Composable
 fun Greeting(name: String, modifier: Modifier = Modifier) {
@@ -156,4 +167,3 @@ fun GreetingPreview() {
         Greeting("Android")
     }
 }
-
