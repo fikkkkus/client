@@ -76,4 +76,6 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:1.6.7")
     implementation("io.ktor:ktor-client-websockets:1.6.7")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+
+    implementation("com.google.guava:guava:31.1-android")
 }
